@@ -8,13 +8,25 @@ from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 from Sastrawi.StopWordRemover.StopWordRemoverFactory import StopWordRemoverFactory
 
 # ============================================================
-# KONFIGURASI PATH ABSOLUT (Disesuaikan dengan Struktur Folder Baru)
+# KONFIGURASI PATH ABSOLUT (Dengan Auto-Deteksi & Fallback Cloud)
 # ============================================================
 # 1. Ambil path folder utama tempat app.py berada
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_FOLDER_NAME = "indobert-mbg-sentiment-final"
 
-# 2. Arahkan masuk ke dalam sub-folder tempat file model disimpan
-MODEL_DIR = os.path.join(CURRENT_DIR, "indobert-mbg-sentiment-final")   
+# Kemungkinan lokasi 1: Folder model berada tepat di samping file app.py
+PATH_OPSI_1 = os.path.join(CURRENT_DIR, MODEL_FOLDER_NAME)
+# Kemungkinan lokasi 2: Folder model dicari dari working directory root repository
+PATH_OPSI_2 = os.path.join(os.getcwd(), MODEL_FOLDER_NAME)
+
+# Mekanisme pemilihan path yang valid secara otomatis
+if os.path.exists(PATH_OPSI_1):
+    MODEL_DIR = PATH_OPSI_1
+elif os.path.exists(PATH_OPSI_2):
+    MODEL_DIR = PATH_OPSI_2
+else:
+    # Default jika belum terdeteksi (agar memicu error handling yang rapi di fungsi load_model)
+    MODEL_DIR = PATH_OPSI_1
 
 MAX_LENGTH = 128
 LABEL_MAP = {0: "Negatif", 1: "Netral", 2: "Positif"}
@@ -176,7 +188,29 @@ def load_preprocessing_tools():
 
 @st.cache_resource(show_spinner="Memuat Model IndoBERT...")
 def load_model():
-    # Mengunci pembacaan langsung ke sub-folder model lokal
+    # 1. Validasi Keberadaan Folder Model
+    if not os.path.exists(MODEL_DIR):
+        raise OSError(
+            f"Folder model '{MODEL_FOLDER_NAME}' tidak ditemukan di sistem cloud!\n"
+            f"Lokasi pencarian:\n"
+            f" - Opsi 1 (Relatif): {PATH_OPSI_1}\n"
+            f" - Opsi 2 (CWD Root): {PATH_OPSI_2}\n"
+            f"Isi direktori root saat ini: {os.listdir(os.getcwd())}"
+        )
+    
+    # 2. Validasi Ketersediaan File Bobot Model (.bin atau .safetensors)
+    isi_folder = os.listdir(MODEL_DIR)
+    file_bobot_tersedia = any(f in isi_folder for f in ['pytorch_model.bin', 'model.safetensors', 'model.pkl'])
+    
+    if not file_bobot_tersedia:
+        raise OSError(
+            f"Folder model ditemukan di: {MODEL_DIR}, namun berkas bobot model "
+            f"('pytorch_model.bin' atau 'model.safetensors') TIDAK DITEMUKAN.\n"
+            f"Isi folder tersebut hanya: {isi_folder}.\n"
+            f"Kemungkinan besar file model terpotong/gagal didorong ke GitHub akibat limitasi batas file 100MB."
+        )
+
+    # Mengunci pembacaan langsung ke sub-folder model lokal terverifikasi
     tokenizer = BertTokenizer.from_pretrained(MODEL_DIR) 
     
     # Memaksa model membaca 3 kelas (Negatif, Netral, Positif) dan bypass perbedaan jumlah label config
@@ -241,19 +275,19 @@ examples = [
     "Program MBG hari ini menu ayam goreng dan sayur, dibagikan jam 9 pagi seperti biasa.",
 ]
 
-# Menggunakan session state agar text tetap aman saat halaman dimuat ulang[cite: 1]
+# Menggunakan session state agar text tetap aman saat halaman dimuat ulang
 if "input_text_val" not in st.session_state:
     st.session_state.input_text_val = ""
 
 st.write("Coba contoh cuitan:")
 cols = st.columns(3)
 
-# Sinkronisasi tombol contoh dengan session state[cite: 1]
+# Sinkronisasi tombol contoh dengan session state
 for i, col in enumerate(cols):
     if col.button(f"Contoh {i+1}", use_container_width=True):
         st.session_state.input_text_val = examples[i]
 
-# Menghubungkan text_area langsung ke session state[cite: 1]
+# Menghubungkan text_area langsung ke session state
 text_input = st.text_area(
     "Masukkan teks / cuitan:", 
     key="input_text_val", 
